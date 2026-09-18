@@ -32,12 +32,8 @@ def get_ups_data():
         # State
         state_data = bus.read_i2c_block_data(ADDR, 0x02, 0x01)
         state = "Idle"
-        if(state_data[0] & 0x40):
-            state = "Fast Charging"
-        elif(state_data[0] & 0x80):
+        if (state_data[0] & 0x40) or (state_data[0] & 0x80):
             state = "Charging"
-        elif(state_data[0] & 0x20):
-            state = "Discharging"
             
         # Battery Data
         batt_data = bus.read_i2c_block_data(ADDR, 0x20, 0x0C)
