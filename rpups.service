@@ -1,0 +1,13 @@
+[Unit]
+Description=Raspberry Pi UPS Manager Daemon
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/rpups daemon
+Restart=on-failure
+RestartSec=10
+User=root
+
+[Install]
+WantedBy=multi-user.target
