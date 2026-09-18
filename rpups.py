@@ -29,12 +29,6 @@ def get_ups_data():
     try:
         bus = smbus.SMBus(BUS_ID)
         
-        # State
-        state_data = bus.read_i2c_block_data(ADDR, 0x02, 0x01)
-        state = "Idle"
-        if (state_data[0] & 0x40) or (state_data[0] & 0x80):
-            state = "Charging"
-            
         # Battery Data
         batt_data = bus.read_i2c_block_data(ADDR, 0x20, 0x0C)
         voltage = batt_data[0] | batt_data[1] << 8
@@ -43,6 +37,12 @@ def get_ups_data():
             current -= 0xFFFF
         percent = int(batt_data[4] | batt_data[5] << 8)
         capacity = batt_data[6] | batt_data[7] << 8
+        
+        # State
+        if current < 0:
+            state = "Battery"
+        else:
+            state = "AC"
         
         return {
             "state": state,
