@@ -64,13 +64,24 @@ def get_ups_data():
             state = "Battery"
         else:
             state = "AC"
+            
+        # Cell Voltages
+        cell_data = bus.read_i2c_block_data(ADDR, 0x30, 0x08)
+        v1 = cell_data[0] | cell_data[1] << 8
+        v2 = cell_data[2] | cell_data[3] << 8
+        v3 = cell_data[4] | cell_data[5] << 8
+        v4 = cell_data[6] | cell_data[7] << 8
         
         return {
             "state": state,
             "voltage": voltage,
             "current": current,
             "percent": percent,
-            "capacity": capacity
+            "capacity": capacity,
+            "v1": v1,
+            "v2": v2,
+            "v3": v3,
+            "v4": v4
         }
     except PermissionError:
         print("Error: Permission denied. Cannot access I2C bus. Try running with sudo, or add user to i2c group.", file=sys.stderr)
@@ -151,9 +162,14 @@ def daemon_mode():
             current = data['current']
             percent = data['percent']
             
+            # Check if any cell voltage drops below critical safe limit (3150 mV)
+            LOW_VOL = 3150
+            is_low_voltage = any(data[f'v{i}'] < LOW_VOL for i in range(1, 5))
+            
             # current < 0 means discharging (running on battery)
-            if percent <= threshold and current < 0:
-                msg = f"RPups daemon powering OFF. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%. Shutting down..."
+            if (percent <= threshold or is_low_voltage) and current < 0:
+                reason = "Cell voltage too low" if is_low_voltage else f"Battery at {percent}%"
+                msg = f"RPups daemon powering OFF ({reason}). State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%. Shutting down..."
                 print(msg, flush=True)
                 log_persistent(msg)
                 
