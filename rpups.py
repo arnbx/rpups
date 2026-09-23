@@ -51,10 +51,10 @@ def get_21700_percent(voltage_mv):
     curve = [
         (4200, 100), (4100, 93), (4000, 83), (3900, 73),
         (3800, 60), (3700, 45), (3600, 30), (3500, 15),
-        (3400, 8), (3300, 3), (3200, 1), (3000, 0)
+        (3400, 8), (3300, 3), (3200, 1), (3100, 0)
     ]
     if voltage_mv >= 4200: return 100
-    if voltage_mv <= 3000: return 0
+    if voltage_mv <= 3100: return 0
     for i in range(len(curve) - 1):
         v_high, p_high = curve[i]
         v_low, p_low = curve[i+1]
@@ -94,37 +94,41 @@ def get_ups_data():
         
         # Auto-Calibration
         config = load_config()
-        # Only calibrate when battery is fully charged and resting (or trickle charging)
-        if current >= 0 and hw_percent >= 95 and percent_raw > 0:
-            needs_save = False
-            # Allow the baseline to adjust both UP (new battery) and DOWN (degrading battery)
-            # We use a small threshold (e.g., 2% for percent, 100mAh for capacity) to avoid saving on tiny fluctuations
-            current_max = config.get('max_raw_percent', 0)
-            if current_max == 0 or abs(current_max - percent_raw) >= 2:
-                config['max_raw_percent'] = percent_raw
-                needs_save = True
+        
+        # Determine if fully charged by reading VBUS voltage and checking current
+        vbus_data = bus.read_i2c_block_data(ADDR, 0x10, 0x06)
+        vbus_voltage = vbus_data[0] | (vbus_data[1] << 8)
+        is_fully_charged = (current == 0 and vbus_voltage > 0)
+        
+        if is_fully_charged:
+            current_time = time.time()
+            last_calibrated = config.get('last_calibrated', 0)
             
-            current_max_cap = config.get('max_hw_capacity', 0)
-            if current_max_cap == 0 or abs(current_max_cap - hw_capacity) >= 100:
+            # Calibrate if never calibrated or if it's been more than 7 days
+            if current_time - last_calibrated >= 7 * 24 * 3600 or last_calibrated == 0:
+                config['max_raw_percent'] = percent_raw
                 config['max_hw_capacity'] = hw_capacity
-                needs_save = True
-            if needs_save:
+                config['last_calibrated'] = current_time
                 try:
                     save_config(config)
+                    log_persistent("Battery calibrated")
                 except PermissionError:
                     pass # Ignore if called by non-root CLI user
                     
-        # Scale to 0-100% relative to the degraded maximum capacity
-        max_raw = config.get('max_raw_percent', 41) # Default to 41 based on user's current degraded state
-        if max_raw <= 0: max_raw = 100
-        
-        percent = int((percent_raw / max_raw) * 100)
-        if percent > 100: percent = 100
-        if percent < 0: percent = 0
-        
-        # Scale capacity proportionally
-        max_cap = config.get('max_hw_capacity', 4632)
-        capacity = int((percent / 100.0) * max_cap)
+        # Display logic
+        if 'max_raw_percent' not in config:
+            percent = hw_percent
+            capacity = hw_capacity
+        else:
+            max_raw = config['max_raw_percent']
+            if max_raw <= 0: max_raw = 100
+            
+            percent = int((percent_raw / max_raw) * 100)
+            if percent > 100: percent = 100
+            if percent < 0: percent = 0
+            
+            max_cap = config.get('max_hw_capacity', hw_capacity)
+            capacity = int((percent / 100.0) * max_cap)
         
         return {
             "state": state,
