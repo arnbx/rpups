@@ -92,6 +92,22 @@ def daemon_mode():
     # Wait a bit on startup to ensure system and i2c bus are fully initialized
     time.sleep(10)
     
+    # Log startup status
+    try:
+        config = load_config()
+        threshold = config.get("poweroff_threshold", DEFAULT_THRESHOLD)
+        data = get_ups_data()
+        print(f"RPups daemon powered ON. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%", flush=True)
+        
+        # Ensure auto-start on power is enabled (Register 0x40, Bit 0 should be 1)
+        bus = smbus.SMBus(BUS_ID)
+        reg_40 = bus.read_byte_data(ADDR, 0x40)
+        if (reg_40 & 0x01) == 0:
+            bus.write_byte_data(ADDR, 0x40, reg_40 | 0x01)
+            print("Auto-start was disabled. Re-enabled it via register 0x40.", flush=True)
+    except Exception as e:
+        print(f"Daemon startup error: {e}", file=sys.stderr, flush=True)
+        
     while True:
         try:
             config = load_config()
@@ -103,15 +119,18 @@ def daemon_mode():
             
             # current < 0 means discharging (running on battery)
             if percent <= threshold and current < 0:
-                print(f"Battery at {percent}%, which is below threshold {threshold}%. Running on battery. Shutting down...")
+                print(f"RPups daemon powering OFF. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%. Shutting down...", flush=True)
+                
                 # Write 0x55 to 0x01 register of 0x2d (Gives 30s to power off, UPS will wake Pi when AC is restored)
-                os.system(f"i2cset -y {BUS_ID} 0x{ADDR:02x} 0x01 0x55")
+                bus = smbus.SMBus(BUS_ID)
+                bus.write_byte_data(ADDR, 0x01, 0x55)
+                
                 time.sleep(2)
                 os.system("poweroff")
                 break # Exit daemon since we are shutting down
                 
         except Exception as e:
-            print(f"Daemon error: {e}", file=sys.stderr)
+            print(f"Daemon error: {e}", file=sys.stderr, flush=True)
             
         # Check every 60 seconds
         time.sleep(60)
