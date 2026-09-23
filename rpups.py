@@ -5,6 +5,7 @@ import os
 import argparse
 import sys
 import json
+import datetime
 
 CONFIG_FILE = "/etc/rpups/config.json"
 DEFAULT_THRESHOLD = 20
@@ -24,6 +25,26 @@ def save_config(config):
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f)
+
+def log_persistent(message):
+    log_file = "/etc/rpups/rpups.log"
+    try:
+        os.makedirs(os.path.dirname(log_file), exist_ok=True)
+        lines = []
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as f:
+                lines = f.readlines()
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"[{timestamp}] {message}\n")
+        
+        if len(lines) > 10:
+            lines = lines[-10:]
+            
+        with open(log_file, 'w') as f:
+            f.writelines(lines)
+    except Exception as e:
+        print(f"Failed to write persistent log: {e}", file=sys.stderr, flush=True)
 
 def get_ups_data():
     try:
@@ -97,7 +118,9 @@ def daemon_mode():
         config = load_config()
         threshold = config.get("poweroff_threshold", DEFAULT_THRESHOLD)
         data = get_ups_data()
-        print(f"RPups daemon powered ON. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%", flush=True)
+        msg = f"RPups daemon powered ON. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%"
+        print(msg, flush=True)
+        log_persistent(msg)
         
         # Ensure auto-start on power is enabled (Register 0x40, Bit 0 should be 1)
         bus = smbus.SMBus(BUS_ID)
@@ -119,7 +142,9 @@ def daemon_mode():
             
             # current < 0 means discharging (running on battery)
             if percent <= threshold and current < 0:
-                print(f"RPups daemon powering OFF. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%. Shutting down...", flush=True)
+                msg = f"RPups daemon powering OFF. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%. Shutting down..."
+                print(msg, flush=True)
+                log_persistent(msg)
                 
                 # Write 0x55 to 0x01 register of 0x2d (Gives 30s to power off, UPS will wake Pi when AC is restored)
                 bus = smbus.SMBus(BUS_ID)
