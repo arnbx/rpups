@@ -109,6 +109,17 @@ def cmd_poweroff(args):
         print(f"Error saving config: {e}", file=sys.stderr)
         sys.exit(1)
 
+def cmd_log(args):
+    log_file = "/etc/rpups/rpups.log"
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r') as f:
+                print(f.read(), end="")
+        except Exception as e:
+            print(f"Error reading log file: {e}", file=sys.stderr)
+    else:
+        print("No logs available yet.")
+
 def daemon_mode():
     # Wait a bit on startup to ensure system and i2c bus are fully initialized
     time.sleep(10)
@@ -178,6 +189,9 @@ def main():
     parser_poweroff = subparsers.add_parser("poweroff", help="Set battery percentage threshold for automatic poweroff")
     parser_poweroff.add_argument("threshold", type=int, help="Battery percentage (0-100)")
     
+    # log command
+    parser_log = subparsers.add_parser("log", help="Show recent startup and shutdown logs")
+    
     # daemon command (internal)
     parser_daemon = subparsers.add_parser("daemon", help=argparse.SUPPRESS)
     
@@ -189,6 +203,8 @@ def main():
         cmd_state(args)
     elif args.command == "poweroff":
         cmd_poweroff(args)
+    elif args.command == "log":
+        cmd_log(args)
     elif args.command == "daemon":
         daemon_mode()
     else:

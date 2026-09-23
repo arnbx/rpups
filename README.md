@@ -48,6 +48,12 @@ You can use the `rpups` command to check the status or configure settings.
   sudo rpups poweroff 10
   ```
 
+- **View startup and shutdown logs:**
+  Displays the persistent log containing the last 10 power events.
+  ```bash
+  rpups log
+  ```
+
 - **View help:**
   ```bash
   rpups -h
