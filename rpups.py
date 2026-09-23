@@ -97,10 +97,15 @@ def get_ups_data():
         # Only calibrate when battery is fully charged and resting (or trickle charging)
         if current >= 0 and hw_percent >= 95 and percent_raw > 0:
             needs_save = False
-            if config.get('max_raw_percent', 0) < percent_raw:
+            # Allow the baseline to adjust both UP (new battery) and DOWN (degrading battery)
+            # We use a small threshold (e.g., 2% for percent, 100mAh for capacity) to avoid saving on tiny fluctuations
+            current_max = config.get('max_raw_percent', 0)
+            if current_max == 0 or abs(current_max - percent_raw) >= 2:
                 config['max_raw_percent'] = percent_raw
                 needs_save = True
-            if config.get('max_hw_capacity', 0) < hw_capacity:
+            
+            current_max_cap = config.get('max_hw_capacity', 0)
+            if current_max_cap == 0 or abs(current_max_cap - hw_capacity) >= 100:
                 config['max_hw_capacity'] = hw_capacity
                 needs_save = True
             if needs_save:
