@@ -46,6 +46,22 @@ def log_persistent(message):
     except Exception as e:
         print(f"Failed to write persistent log: {e}", file=sys.stderr, flush=True)
 
+def get_21700_percent(voltage_mv):
+    """Calculate battery percentage based on standard 21700 discharge curve."""
+    curve = [
+        (4200, 100), (4100, 93), (4000, 83), (3900, 73),
+        (3800, 60), (3700, 45), (3600, 30), (3500, 15),
+        (3400, 8), (3300, 3), (3200, 1), (3000, 0)
+    ]
+    if voltage_mv >= 4200: return 100
+    if voltage_mv <= 3000: return 0
+    for i in range(len(curve) - 1):
+        v_high, p_high = curve[i]
+        v_low, p_low = curve[i+1]
+        if v_low <= voltage_mv <= v_high:
+            return int(p_low + (voltage_mv - v_low) * (p_high - p_low) / (v_high - v_low))
+    return 0
+
 def get_ups_data():
     try:
         bus = smbus.SMBus(BUS_ID)
@@ -56,7 +72,7 @@ def get_ups_data():
         current = (batt_data[2] | batt_data[3] << 8)
         if(current > 0x7FFF):
             current -= 0xFFFF
-        percent = int(batt_data[4] | batt_data[5] << 8)
+        hw_percent = int(batt_data[4] | batt_data[5] << 8) # Hardware percent (often inaccurate)
         capacity = batt_data[6] | batt_data[7] << 8
         
         # State
@@ -71,6 +87,10 @@ def get_ups_data():
         v2 = cell_data[2] | cell_data[3] << 8
         v3 = cell_data[4] | cell_data[5] << 8
         v4 = cell_data[6] | cell_data[7] << 8
+        
+        # Calculate true usable percentage based on the lowest cell
+        lowest_cell_v = min(v1, v2, v3, v4)
+        percent = get_21700_percent(lowest_cell_v)
         
         return {
             "state": state,
