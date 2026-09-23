@@ -73,7 +73,7 @@ def get_ups_data():
         if(current > 0x7FFF):
             current -= 0xFFFF
         hw_percent = int(batt_data[4] | batt_data[5] << 8) # Hardware percent (often inaccurate)
-        capacity = batt_data[6] | batt_data[7] << 8
+        hw_capacity = batt_data[6] | batt_data[7] << 8
         
         # State
         if current < 0:
@@ -88,9 +88,38 @@ def get_ups_data():
         v3 = cell_data[4] | cell_data[5] << 8
         v4 = cell_data[6] | cell_data[7] << 8
         
-        # Calculate true usable percentage based on the lowest cell
+        # Calculate raw usable percentage based on the lowest cell
         lowest_cell_v = min(v1, v2, v3, v4)
-        percent = get_21700_percent(lowest_cell_v)
+        percent_raw = get_21700_percent(lowest_cell_v)
+        
+        # Auto-Calibration
+        config = load_config()
+        # Only calibrate when battery is fully charged and resting (or trickle charging)
+        if current >= 0 and hw_percent >= 95 and percent_raw > 0:
+            needs_save = False
+            if config.get('max_raw_percent', 0) < percent_raw:
+                config['max_raw_percent'] = percent_raw
+                needs_save = True
+            if config.get('max_hw_capacity', 0) < hw_capacity:
+                config['max_hw_capacity'] = hw_capacity
+                needs_save = True
+            if needs_save:
+                try:
+                    save_config(config)
+                except PermissionError:
+                    pass # Ignore if called by non-root CLI user
+                    
+        # Scale to 0-100% relative to the degraded maximum capacity
+        max_raw = config.get('max_raw_percent', 41) # Default to 41 based on user's current degraded state
+        if max_raw <= 0: max_raw = 100
+        
+        percent = int((percent_raw / max_raw) * 100)
+        if percent > 100: percent = 100
+        if percent < 0: percent = 0
+        
+        # Scale capacity proportionally
+        max_cap = config.get('max_hw_capacity', 4632)
+        capacity = int((percent / 100.0) * max_cap)
         
         return {
             "state": state,
