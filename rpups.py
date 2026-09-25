@@ -98,7 +98,8 @@ def get_ups_data():
         # Determine if fully charged by reading VBUS voltage and checking current
         vbus_data = bus.read_i2c_block_data(ADDR, 0x10, 0x06)
         vbus_voltage = vbus_data[0] | (vbus_data[1] << 8)
-        is_fully_charged = (current == 0 and vbus_voltage > 0)
+        # ADC current measurements often fluctuate, so check if current is near 0 and hw_percent is high
+        is_fully_charged = (abs(current) <= 20 and vbus_voltage > 0 and hw_percent >= 95)
         
         if is_fully_charged:
             current_time = time.time()
