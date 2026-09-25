@@ -62,7 +62,7 @@ def get_21700_percent(voltage_mv):
             return int(p_low + (voltage_mv - v_low) * (p_high - p_low) / (v_high - v_low))
     return 0
 
-def get_ups_data():
+def get_ups_data(fail_hard=True):
     try:
         bus = smbus.SMBus(BUS_ID)
         
@@ -70,8 +70,8 @@ def get_ups_data():
         batt_data = bus.read_i2c_block_data(ADDR, 0x20, 0x0C)
         voltage = batt_data[0] | batt_data[1] << 8
         current = (batt_data[2] | batt_data[3] << 8)
-        if(current > 0x7FFF):
-            current -= 0xFFFF
+        if current > 0x7FFF:
+            current -= 0x10000
         hw_percent = int(batt_data[4] | batt_data[5] << 8) # Hardware percent (often inaccurate)
         hw_capacity = batt_data[6] | batt_data[7] << 8
         
@@ -113,8 +113,8 @@ def get_ups_data():
                 try:
                     save_config(config)
                     log_persistent("Battery calibrated")
-                except PermissionError:
-                    pass # Ignore if called by non-root CLI user
+                except Exception:
+                    pass # Ignore if called by non-root CLI user or other I/O error
                     
         # Display logic
         if 'max_raw_percent' not in config:
@@ -144,10 +144,14 @@ def get_ups_data():
         }
     except PermissionError:
         print("Error: Permission denied. Cannot access I2C bus. Try running with sudo, or add user to i2c group.", file=sys.stderr)
-        sys.exit(1)
+        if fail_hard:
+            sys.exit(1)
+        raise
     except Exception as e:
         print(f"Error reading UPS data: {e}", file=sys.stderr)
-        sys.exit(1)
+        if fail_hard:
+            sys.exit(1)
+        raise
 
 def cmd_remain(args):
     data = get_ups_data()
@@ -194,30 +198,33 @@ def daemon_mode():
     # Wait a bit on startup to ensure system and i2c bus are fully initialized
     time.sleep(10)
     
-    # Log startup status
+    # Ensure auto-start on power is enabled (Register 0x40, Bit 0 should be 1)
     try:
-        config = load_config()
-        threshold = config.get("poweroff_threshold", DEFAULT_THRESHOLD)
-        data = get_ups_data()
-        msg = f"RPups daemon powered ON. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%"
-        print(msg, flush=True)
-        log_persistent(msg)
-        
-        # Ensure auto-start on power is enabled (Register 0x40, Bit 0 should be 1)
         bus = smbus.SMBus(BUS_ID)
         reg_40 = bus.read_byte_data(ADDR, 0x40)
         if (reg_40 & 0x01) == 0:
             bus.write_byte_data(ADDR, 0x40, reg_40 | 0x01)
             print("Auto-start was disabled. Re-enabled it via register 0x40.", flush=True)
     except Exception as e:
-        print(f"Daemon startup error: {e}", file=sys.stderr, flush=True)
+        print(f"Error checking/setting auto-start: {e}", file=sys.stderr, flush=True)
+        
+    # Log startup status
+    try:
+        config = load_config()
+        threshold = config.get("poweroff_threshold", DEFAULT_THRESHOLD)
+        data = get_ups_data(fail_hard=False)
+        msg = f"RPups daemon powered ON. State: {data['state']}, Capacity: {data['capacity']} mAh, Percentage: {data['percent']}%, Poweroff threshold: {threshold}%"
+        print(msg, flush=True)
+        log_persistent(msg)
+    except Exception as e:
+        print(f"Daemon startup error reading UPS data: {e}", file=sys.stderr, flush=True)
         
     while True:
         try:
             config = load_config()
             threshold = config.get("poweroff_threshold", DEFAULT_THRESHOLD)
             
-            data = get_ups_data()
+            data = get_ups_data(fail_hard=False)
             current = data['current']
             percent = data['percent']
             
@@ -233,8 +240,11 @@ def daemon_mode():
                 log_persistent(msg)
                 
                 # Write 0x55 to 0x01 register of 0x2d (Gives 30s to power off, UPS will wake Pi when AC is restored)
-                bus = smbus.SMBus(BUS_ID)
-                bus.write_byte_data(ADDR, 0x01, 0x55)
+                try:
+                    bus = smbus.SMBus(BUS_ID)
+                    bus.write_byte_data(ADDR, 0x01, 0x55)
+                except Exception as e:
+                    print(f"Failed to write poweroff command to UPS: {e}", file=sys.stderr, flush=True)
                 
                 time.sleep(2)
                 os.system("poweroff")
